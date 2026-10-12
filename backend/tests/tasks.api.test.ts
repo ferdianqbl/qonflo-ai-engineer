@@ -8,10 +8,10 @@ import { ActorRepository } from "../src/features/actors/actor.repository";
 import { ActorService } from "../src/features/actors/actor.service";
 import { AuditLogRepository } from "../src/features/audit-logs/audit-log.repository";
 import { AuditLogService } from "../src/features/audit-logs/audit-log.service";
-import type { AuditLog } from "../src/features/audit-logs/audit-log.types";
+import type { AuditLog, NewAuditLog } from "../src/features/audit-logs/audit-log.types";
 import { TaskRepository } from "../src/features/tasks/task.repository";
 import { TaskService } from "../src/features/tasks/task.service";
-import type { Task } from "../src/features/tasks/task.types";
+import type { Task, TaskInput } from "../src/features/tasks/task.types";
 
 let db: Db;
 let app: Express;
@@ -21,18 +21,43 @@ beforeEach(() => {
   app = createApp(db);
 });
 
-async function createTask(title = "Prepare Invoice"): Promise<Task> {
-  const response = await request(app).post("/api/tasks").send({ title }).expect(201);
+// Each helper sends the acting user in the X-Actor header, like the frontend does.
+
+function postTask(input: Partial<TaskInput>, actor = "john.doe") {
+  return request(app).post("/api/tasks").set("X-Actor", actor).send(input);
+}
+
+async function createTask(title = "Prepare Invoice", description?: string): Promise<Task> {
+  const response = await postTask({ title, description }).expect(201);
   return response.body;
 }
 
+function updateTask(taskId: string, input: Partial<TaskInput>, actor = "john.doe") {
+  return request(app).put(`/api/tasks/${taskId}`).set("X-Actor", actor).send(input);
+}
+
 function changeStatus(taskId: string, status: string, actor = "john.doe") {
-  return request(app).patch(`/api/tasks/${taskId}/status`).send({ status, actor });
+  return request(app).patch(`/api/tasks/${taskId}/status`).set("X-Actor", actor).send({ status });
+}
+
+function deleteTask(taskId: string, actor = "john.doe") {
+  return request(app).delete(`/api/tasks/${taskId}`).set("X-Actor", actor);
+}
+
+async function listTasks(): Promise<Task[]> {
+  const response = await request(app).get("/api/tasks").expect(200);
+  return response.body;
 }
 
 async function getAuditLogs(taskId: string): Promise<AuditLog[]> {
   const response = await request(app).get(`/api/tasks/${taskId}/audit-logs`).expect(200);
   return response.body;
+}
+
+/** "john.doe status_changed status: to_do → pending" — compact form for comparing histories. */
+function summarize(log: AuditLog): string {
+  const change = log.field ? ` ${log.field}: ${log.fromValue} → ${log.toValue}` : "";
+  return `${log.actor} ${log.action}${change}`;
 }
 
 describe("actors", () => {
@@ -43,12 +68,12 @@ describe("actors", () => {
   });
 });
 
-describe("tasks", () => {
-  it("creates a task in to_do and lists it", async () => {
-    const response = await request(app)
-      .post("/api/tasks")
-      .send({ title: "  Prepare Invoice  ", description: "For client A" })
-      .expect(201);
+describe("creating and listing tasks", () => {
+  it("creates a task in to_do, lists it, and records who created it", async () => {
+    const response = await postTask(
+      { title: "  Prepare Invoice  ", description: "For client A" },
+      "jane.smith",
+    ).expect(201);
 
     expect(response.body).toMatchObject({
       title: "Prepare Invoice",
@@ -56,60 +81,110 @@ describe("tasks", () => {
       status: "to_do",
     });
     expect(response.body.createdAt).toBe(response.body.updatedAt);
-
-    const list = await request(app).get("/api/tasks").expect(200);
-    expect(list.body).toEqual([response.body]);
+    expect(await listTasks()).toEqual([response.body]);
+    expect(await getAuditLogs(response.body.id)).toEqual([
+      {
+        id: expect.any(Number),
+        taskId: response.body.id,
+        taskTitle: "Prepare Invoice",
+        actor: "jane.smith",
+        action: "created",
+        field: null,
+        fromValue: null,
+        toValue: null,
+        timestamp: response.body.createdAt,
+      },
+    ]);
   });
 
   it("rejects a task without a title", async () => {
-    const response = await request(app).post("/api/tasks").send({ title: "   " }).expect(400);
+    const response = await postTask({ title: "   " }).expect(400);
 
     expect(response.body.error.code).toBe("VALIDATION_ERROR");
-  });
-
-  it("removes a deleted task from the list", async () => {
-    const task = await createTask();
-
-    await request(app).delete(`/api/tasks/${task.id}`).expect(204);
-
-    const list = await request(app).get("/api/tasks").expect(200);
-    expect(list.body).toEqual([]);
-    await request(app).delete(`/api/tasks/${task.id}`).expect(404);
+    expect(await listTasks()).toEqual([]);
   });
 });
 
-describe("status changes", () => {
+describe("updating a task", () => {
+  it("changes title and description and records one entry per changed field", async () => {
+    const task = await createTask("Prepare Invoice", "For client A");
+
+    const response = await updateTask(
+      task.id,
+      { title: "Prepare Invoice Q4", description: "" },
+      "jane.smith",
+    ).expect(200);
+
+    expect(response.body).toMatchObject({
+      title: "Prepare Invoice Q4",
+      description: null,
+      status: "to_do",
+    });
+    expect((await listTasks())[0]).toEqual(response.body);
+
+    const logs = await getAuditLogs(task.id);
+    expect(logs.map(summarize)).toEqual([
+      "john.doe created",
+      "jane.smith updated title: Prepare Invoice → Prepare Invoice Q4",
+      "jane.smith updated description: For client A → null",
+    ]);
+    // The entries keep the title the task had when the change was made.
+    expect(logs[1]).toMatchObject({ taskTitle: "Prepare Invoice", timestamp: response.body.updatedAt });
+  });
+
+  it("records only the field that really changed", async () => {
+    const task = await createTask("Prepare Invoice", "For client A");
+
+    await updateTask(task.id, { title: "Prepare Invoice", description: "For client B" }).expect(200);
+
+    expect((await getAuditLogs(task.id)).map(summarize)).toEqual([
+      "john.doe created",
+      "john.doe updated description: For client A → For client B",
+    ]);
+  });
+
+  it("is idempotent: saving the same values writes no audit log", async () => {
+    const task = await createTask("Prepare Invoice", "For client A");
+
+    const response = await updateTask(
+      task.id,
+      { title: "Prepare Invoice", description: "For client A" },
+      "jane.smith",
+    ).expect(200);
+
+    expect(response.body).toEqual(task);
+    expect(await getAuditLogs(task.id)).toHaveLength(1);
+  });
+
+  it("rejects an empty title without changing anything", async () => {
+    const task = await createTask();
+
+    const response = await updateTask(task.id, { title: "" }).expect(400);
+
+    expect(response.body.error.code).toBe("VALIDATION_ERROR");
+    expect(await listTasks()).toEqual([task]);
+    expect(await getAuditLogs(task.id)).toHaveLength(1);
+  });
+});
+
+describe("changing status", () => {
   it("moves a task one step forward and records who did it", async () => {
     const task = await createTask();
 
     const response = await changeStatus(task.id, "pending", "jane.smith").expect(200);
 
     expect(response.body.status).toBe("pending");
-    expect(await getAuditLogs(task.id)).toEqual([
-      {
-        id: expect.any(Number),
-        taskId: task.id,
-        actor: "jane.smith",
-        fromStatus: "to_do",
-        toStatus: "pending",
-        timestamp: response.body.updatedAt,
-      },
-    ]);
-  });
-
-  it("returns the audit log in chronological order", async () => {
-    const task = await createTask();
-
-    await changeStatus(task.id, "pending", "john.doe").expect(200);
-    await changeStatus(task.id, "in_progress", "jane.smith").expect(200);
-    await changeStatus(task.id, "done", "budi.santoso").expect(200);
-
-    const logs = await getAuditLogs(task.id);
-    expect(logs.map((log) => `${log.actor}: ${log.fromStatus} → ${log.toStatus}`)).toEqual([
-      "john.doe: to_do → pending",
-      "jane.smith: pending → in_progress",
-      "budi.santoso: in_progress → done",
-    ]);
+    expect((await getAuditLogs(task.id)).at(-1)).toEqual({
+      id: expect.any(Number),
+      taskId: task.id,
+      taskTitle: "Prepare Invoice",
+      actor: "jane.smith",
+      action: "status_changed",
+      field: "status",
+      fromValue: "to_do",
+      toValue: "pending",
+      timestamp: response.body.updatedAt,
+    });
   });
 
   it("is idempotent: setting the current status again writes no audit log", async () => {
@@ -119,7 +194,7 @@ describe("status changes", () => {
     const repeat = await changeStatus(task.id, "pending", "jane.smith").expect(200);
 
     expect(repeat.body).toEqual(first.body);
-    expect(await getAuditLogs(task.id)).toHaveLength(1);
+    expect(await getAuditLogs(task.id)).toHaveLength(2);
   });
 
   it.each<[string, TaskStatus[], TaskStatus]>([
@@ -136,54 +211,118 @@ describe("status changes", () => {
     const response = await changeStatus(task.id, target).expect(409);
 
     expect(response.body.error.code).toBe("INVALID_TRANSITION");
-    const list = await request(app).get("/api/tasks");
-    expect(list.body[0].status).toBe(setup.at(-1) ?? "to_do");
-    expect(await getAuditLogs(task.id)).toHaveLength(setup.length);
+    expect((await listTasks())[0]?.status).toBe(setup.at(-1) ?? "to_do");
+    expect(await getAuditLogs(task.id)).toHaveLength(1 + setup.length);
   });
 
-  it("rejects an unknown status or an actor that is not on the predefined list", async () => {
+  it("rejects a status that does not exist", async () => {
     const task = await createTask();
 
-    const badStatus = await changeStatus(task.id, "archived").expect(400);
-    const badActor = await changeStatus(task.id, "pending", "mallory").expect(400);
+    const response = await changeStatus(task.id, "archived").expect(400);
 
-    expect(badStatus.body.error.code).toBe("VALIDATION_ERROR");
-    expect(badActor.body.error.code).toBe("VALIDATION_ERROR");
-    expect(await getAuditLogs(task.id)).toEqual([]);
-  });
-
-  it("returns 404 for a task that does not exist or was deleted", async () => {
-    const task = await createTask();
-    await request(app).delete(`/api/tasks/${task.id}`).expect(204);
-
-    await changeStatus("missing-id", "pending").expect(404);
-    await changeStatus(task.id, "pending").expect(404);
+    expect(response.body.error.code).toBe("VALIDATION_ERROR");
+    expect(await getAuditLogs(task.id)).toHaveLength(1);
   });
 });
 
-describe("audit log integrity", () => {
-  it("returns 404 for the audit log of a task that never existed", async () => {
+describe("deleting a task", () => {
+  it("removes the task from the list and records who deleted it", async () => {
+    const task = await createTask();
+
+    await deleteTask(task.id, "budi.santoso").expect(204);
+
+    expect(await listTasks()).toEqual([]);
+    // The history is still readable after the task is gone, and ends with the deletion.
+    expect((await getAuditLogs(task.id)).map(summarize)).toEqual([
+      "john.doe created",
+      "budi.santoso deleted",
+    ]);
+  });
+
+  it("returns 404 for any further change to a deleted or unknown task", async () => {
+    const task = await createTask();
+    await deleteTask(task.id).expect(204);
+
+    await deleteTask(task.id).expect(404);
+    await updateTask(task.id, { title: "Renamed" }).expect(404);
+    await changeStatus(task.id, "pending").expect(404);
+    await changeStatus("missing-id", "pending").expect(404);
+    expect(await getAuditLogs(task.id)).toHaveLength(2);
+  });
+});
+
+describe("the acting user", () => {
+  it.each<[string, (taskId: string, actor: string) => request.Test]>([
+    ["create", (_taskId, actor) => postTask({ title: "Another task" }, actor)],
+    ["update", (taskId, actor) => updateTask(taskId, { title: "Renamed" }, actor)],
+    ["status change", (taskId, actor) => changeStatus(taskId, "pending", actor)],
+    ["delete", (taskId, actor) => deleteTask(taskId, actor)],
+  ])("rejects a %s by someone who is not on the predefined list", async (_name, write) => {
+    const task = await createTask();
+
+    const unknown = await write(task.id, "mallory").expect(400);
+    const missing = await write(task.id, "").expect(400);
+
+    expect(unknown.body.error.code).toBe("VALIDATION_ERROR");
+    expect(missing.body.error.code).toBe("VALIDATION_ERROR");
+    expect(await listTasks()).toEqual([task]);
+    expect(await getAuditLogs(task.id)).toHaveLength(1);
+  });
+});
+
+describe("history of all tasks", () => {
+  it("returns every entry of every task in chronological order, deleted tasks included", async () => {
+    const invoice = await createTask("Prepare Invoice");
+    const contract = await createTask("Review Contract");
+    await changeStatus(invoice.id, "pending", "jane.smith").expect(200);
+    await updateTask(contract.id, { title: "Review Contract v2" }, "budi.santoso").expect(200);
+    await deleteTask(invoice.id, "jane.smith").expect(204);
+
+    const response = await request(app).get("/api/audit-logs").expect(200);
+    const logs: AuditLog[] = response.body;
+
+    expect(logs.map((log) => `${log.taskTitle} — ${summarize(log)}`)).toEqual([
+      "Prepare Invoice — john.doe created",
+      "Review Contract — john.doe created",
+      "Prepare Invoice — jane.smith status_changed status: to_do → pending",
+      "Review Contract — budi.santoso updated title: Review Contract → Review Contract v2",
+      "Prepare Invoice — jane.smith deleted",
+    ]);
+  });
+
+  it("returns the history of one task in chronological order", async () => {
+    const task = await createTask();
+    await createTask("Another task");
+
+    await changeStatus(task.id, "pending", "john.doe").expect(200);
+    await changeStatus(task.id, "in_progress", "jane.smith").expect(200);
+    await changeStatus(task.id, "done", "budi.santoso").expect(200);
+
+    expect((await getAuditLogs(task.id)).map(summarize)).toEqual([
+      "john.doe created",
+      "john.doe status_changed status: to_do → pending",
+      "jane.smith status_changed status: pending → in_progress",
+      "budi.santoso status_changed status: in_progress → done",
+    ]);
+  });
+
+  it("returns 404 for the history of a task that never existed", async () => {
     const response = await request(app).get("/api/tasks/missing-id/audit-logs").expect(404);
 
     expect(response.body.error.code).toBe("TASK_NOT_FOUND");
   });
+});
 
-  it("keeps the audit log readable after its task is deleted", async () => {
-    const task = await createTask();
-    await changeStatus(task.id, "pending").expect(200);
-
-    await request(app).delete(`/api/tasks/${task.id}`).expect(204);
-
-    expect(await getAuditLogs(task.id)).toHaveLength(1);
-  });
-
+describe("audit log integrity", () => {
   it("exposes no way to modify or delete audit logs over HTTP", async () => {
     const task = await createTask();
-    await changeStatus(task.id, "pending").expect(200);
 
     await request(app).put(`/api/tasks/${task.id}/audit-logs`).send([]).expect(404);
     await request(app).delete(`/api/tasks/${task.id}/audit-logs`).expect(404);
     await request(app).delete(`/api/tasks/${task.id}/audit-logs/1`).expect(404);
+    await request(app).post("/api/audit-logs").send({}).expect(404);
+    await request(app).delete("/api/audit-logs").expect(404);
+    await request(app).delete("/api/audit-logs/1").expect(404);
   });
 
   it("makes the database itself refuse UPDATE and DELETE on audit_logs", async () => {
@@ -195,28 +334,60 @@ describe("audit log integrity", () => {
     );
     expect(() => db.prepare("DELETE FROM audit_logs").run()).toThrow(/append-only/);
     expect(() => db.prepare("DELETE FROM tasks WHERE id = ?").run(task.id)).toThrow(/FOREIGN KEY/);
-    expect(await getAuditLogs(task.id)).toHaveLength(1);
+    expect(await getAuditLogs(task.id)).toHaveLength(2);
   });
 
-  it("rolls the status change back when the audit log cannot be written", async () => {
+  describe("when the audit log cannot be written", () => {
+    /** Accepts `allowed` entries, then fails like a full disk would. */
     class FailingAuditLogRepository extends AuditLogRepository {
-      override insert(): void {
-        throw new Error("disk full");
+      allowed = 0;
+
+      override insert(entry: NewAuditLog): void {
+        if (this.allowed <= 0) {
+          throw new Error("disk full");
+        }
+        this.allowed -= 1;
+        super.insert(entry);
       }
     }
-    const service = new TaskService(
-      new TaskRepository(db),
-      new AuditLogService(new FailingAuditLogRepository(db)),
-      new ActorService(new ActorRepository()),
-      createTransactionRunner(db),
-    );
-    const task = service.createTask({ title: "Prepare Invoice" });
 
-    expect(() => service.changeStatus(task.id, { status: "pending", actor: "john.doe" })).toThrow(
-      "disk full",
-    );
+    let auditLogRepository: FailingAuditLogRepository;
+    let service: TaskService;
 
-    expect(service.listTasks()[0]?.status).toBe("to_do");
-    expect(await getAuditLogs(task.id)).toEqual([]);
+    beforeEach(() => {
+      auditLogRepository = new FailingAuditLogRepository(db);
+      service = new TaskService(
+        new TaskRepository(db),
+        new AuditLogService(auditLogRepository),
+        new ActorService(new ActorRepository()),
+        createTransactionRunner(db),
+      );
+    });
+
+    function createLoggedTask(): Task {
+      auditLogRepository.allowed = 1;
+      return service.createTask({ title: "Prepare Invoice" }, "john.doe");
+    }
+
+    it("does not create the task", () => {
+      expect(() => service.createTask({ title: "Prepare Invoice" }, "john.doe")).toThrow(
+        "disk full",
+      );
+
+      expect(service.listTasks()).toEqual([]);
+    });
+
+    it.each<[string, (taskId: string) => unknown]>([
+      ["update", (taskId) => service.updateTask(taskId, { title: "Renamed" }, "john.doe")],
+      ["status change", (taskId) => service.changeStatus(taskId, "pending", "john.doe")],
+      ["delete", (taskId) => service.deleteTask(taskId, "john.doe")],
+    ])("rolls the %s back", async (_name, write) => {
+      const task = createLoggedTask();
+
+      expect(() => write(task.id)).toThrow("disk full");
+
+      expect(service.listTasks()).toEqual([task]);
+      expect(await getAuditLogs(task.id)).toHaveLength(1);
+    });
   });
 });

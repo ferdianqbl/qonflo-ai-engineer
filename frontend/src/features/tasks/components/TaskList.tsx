@@ -1,16 +1,17 @@
 import type { TaskStatus } from "../../../core/task-status";
-import type { Task } from "../task.types";
+import type { Task, TaskInput } from "../task.types";
 import { TaskItem } from "./TaskItem";
 
 interface TaskListProps {
   tasks: Task[];
   loading: boolean;
-  actor: string;
-  onChangeStatus: (taskId: string, status: TaskStatus, actor: string) => Promise<boolean>;
+  canAct: boolean;
+  onChangeStatus: (taskId: string, status: TaskStatus) => Promise<boolean>;
+  onUpdate: (taskId: string, input: TaskInput) => Promise<boolean>;
   onDelete: (taskId: string) => Promise<boolean>;
 }
 
-export function TaskList({ tasks, loading, actor, onChangeStatus, onDelete }: TaskListProps) {
+export function TaskList({ tasks, loading, ...itemProps }: TaskListProps) {
   return (
     <section>
       <h2>
@@ -24,13 +25,7 @@ export function TaskList({ tasks, loading, actor, onChangeStatus, onDelete }: Ta
 
       <ul className="task-list">
         {tasks.map((task) => (
-          <TaskItem
-            key={task.id}
-            task={task}
-            actor={actor}
-            onChangeStatus={onChangeStatus}
-            onDelete={onDelete}
-          />
+          <TaskItem key={task.id} task={task} {...itemProps} />
         ))}
       </ul>
     </section>

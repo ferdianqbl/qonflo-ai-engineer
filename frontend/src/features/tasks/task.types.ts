@@ -13,12 +13,12 @@ export interface Task {
   updatedAt: string;
 }
 
-export interface CreateTaskRequest {
+/** What a user types in: the body of both "create task" and "update task". */
+export interface TaskInput {
   title: string;
   description?: string;
 }
 
 export interface UpdateTaskStatusRequest {
   status: TaskStatus;
-  actor: string;
 }

@@ -4,17 +4,21 @@ import { formatDateTime } from "../../../core/format";
 import { STATUS_LABELS } from "../../../core/status-labels";
 import { getNextStatus, type TaskStatus } from "../../../core/task-status";
 import { AuditLogPanel } from "../../audit-logs/components/AuditLogPanel";
-import type { Task } from "../task.types";
+import type { Task, TaskInput } from "../task.types";
 import { StatusFlow } from "./StatusFlow";
+import { TaskForm } from "./TaskForm";
 
 interface TaskItemProps {
   task: Task;
-  actor: string;
-  onChangeStatus: (taskId: string, status: TaskStatus, actor: string) => Promise<boolean>;
+  /** False until an acting user is selected: every change must be attributed to someone. */
+  canAct: boolean;
+  onChangeStatus: (taskId: string, status: TaskStatus) => Promise<boolean>;
+  onUpdate: (taskId: string, input: TaskInput) => Promise<boolean>;
   onDelete: (taskId: string) => Promise<boolean>;
 }
 
-export function TaskItem({ task, actor, onChangeStatus, onDelete }: TaskItemProps) {
+export function TaskItem({ task, canAct, onChangeStatus, onUpdate, onDelete }: TaskItemProps) {
+  const [editing, setEditing] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -28,14 +32,33 @@ export function TaskItem({ task, actor, onChangeStatus, onDelete }: TaskItemProp
     setBusy(false);
   }
 
+  async function saveEdit(input: TaskInput): Promise<boolean> {
+    const saved = await onUpdate(task.id, input);
+    if (saved) {
+      setEditing(false);
+    }
+    return saved;
+  }
+
   return (
     <li className="card task">
-      <div className="task__header">
-        <h3>{task.title}</h3>
-        <StatusBadge status={task.status} />
-      </div>
-
-      {task.description && <p className="task__description">{task.description}</p>}
+      {editing ? (
+        <TaskForm
+          initial={{ title: task.title, description: task.description ?? "" }}
+          submitLabel="Save changes"
+          disabled={!canAct}
+          onSubmit={saveEdit}
+          onCancel={() => setEditing(false)}
+        />
+      ) : (
+        <>
+          <div className="task__header">
+            <h3>{task.title}</h3>
+            <StatusBadge status={task.status} />
+          </div>
+          {task.description && <p className="task__description">{task.description}</p>}
+        </>
+      )}
 
       <StatusFlow current={task.status} />
 
@@ -47,14 +70,18 @@ export function TaskItem({ task, actor, onChangeStatus, onDelete }: TaskItemProp
         {nextStatus ? (
           <button
             className="button button--primary"
-            disabled={busy || !actor}
-            onClick={() => run(() => onChangeStatus(task.id, nextStatus, actor))}
+            disabled={busy || !canAct}
+            onClick={() => run(() => onChangeStatus(task.id, nextStatus))}
           >
             Move to {STATUS_LABELS[nextStatus]}
           </button>
         ) : (
           <span className="task__finished">Completed — no further status</span>
         )}
+
+        <button className="button" disabled={editing} onClick={() => setEditing(true)}>
+          Edit
+        </button>
 
         <button
           className="button"
@@ -69,7 +96,7 @@ export function TaskItem({ task, actor, onChangeStatus, onDelete }: TaskItemProp
             Delete this task?
             <button
               className="button button--danger"
-              disabled={busy}
+              disabled={busy || !canAct}
               onClick={() => run(() => onDelete(task.id))}
             >
               Yes, delete
@@ -85,7 +112,7 @@ export function TaskItem({ task, actor, onChangeStatus, onDelete }: TaskItemProp
         )}
       </div>
 
-      {/* `updatedAt` moves on every status change, so an open panel refreshes itself. */}
+      {/* `updatedAt` moves on every change, so an open panel refreshes itself. */}
       {showHistory && (
         <AuditLogPanel taskId={task.id} taskTitle={task.title} refreshKey={task.updatedAt} />
       )}

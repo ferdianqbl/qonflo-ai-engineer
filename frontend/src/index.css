@@ -120,12 +120,9 @@ textarea {
   gap: 12px;
 }
 
-.task-form h2 {
-  margin-bottom: 0;
-}
-
-.task-form .button {
-  justify-self: start;
+.task-form__actions {
+  display: flex;
+  gap: 8px;
 }
 
 /* Buttons */
@@ -164,9 +161,34 @@ textarea {
   color: var(--muted);
 }
 
-:is(.button, input, textarea, select):focus-visible {
+:is(.button, .tabs__tab, input, textarea, select):focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
+}
+
+/* Tabs */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tabs__tab {
+  margin-bottom: -1px;
+  padding: 8px 14px;
+  border: none;
+  border-bottom: 3px solid transparent;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.tabs__tab[aria-current="page"] {
+  border-bottom-color: var(--primary);
+  color: var(--text);
 }
 
 /* Feedback */
@@ -343,13 +365,41 @@ textarea {
   font-size: 0.9rem;
 }
 
-.audit-log__list li {
+.audit-log__entry {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 12px;
 }
 
-.audit-log__list time {
+.audit-log__entry time {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+
+.audit-log__entry em {
+  color: var(--muted);
+}
+
+.audit-log__entry q {
+  overflow-wrap: anywhere;
+}
+
+/* Names the task an entry belongs to, in the history of all tasks. */
+.audit-log__task {
+  margin-right: 8px;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+/* The history of all tasks is a card of its own, not a section inside a task. */
+.audit-log--all {
+  padding-top: 16px;
+}
+
+.audit-log--all h2 {
+  margin-bottom: 4px;
 }

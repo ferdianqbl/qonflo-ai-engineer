@@ -1,0 +1,25 @@
+{
+  "name": "mini-task-manager",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mini Task Manager with an immutable audit log (React + Express + TypeScript)",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "dev:backend": "npm run dev -w backend",
+    "dev:frontend": "npm run dev -w frontend",
+    "test": "npm test -w backend",
+    "typecheck": "npm run typecheck --workspaces",
+    "build": "npm run build -w frontend"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "devDependencies": {
+    "concurrently": "10.0.6",
+    "typescript": "7.0.2"
+  }
+}

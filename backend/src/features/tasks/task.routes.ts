@@ -1,10 +1,18 @@
 import { Router, type Request } from "express";
 import { parseBody } from "../../core/validation";
-import { createTaskSchema, updateTaskStatusSchema } from "./task.schemas";
+import { taskInputSchema, updateTaskStatusSchema } from "./task.schemas";
 import type { TaskService } from "./task.service";
 
+/**
+ * Who is making the request. There is no login, so the client names the acting user in the
+ * `X-Actor` header of every write; the service rejects a name that is not on the user list.
+ */
+function actorOf(req: { header(name: string): string | undefined }): string {
+  return req.header("x-actor") ?? "";
+}
+
 /** HTTP layer: validate the request, call the service, shape the response. */
-export function createTaskRouter(service: TaskService, auditLogRouter: Router): Router {
+export function createTaskRouter(service: TaskService, taskAuditLogRouter: Router): Router {
   const router = Router();
 
   router.get("/", (_req, res) => {
@@ -12,17 +20,22 @@ export function createTaskRouter(service: TaskService, auditLogRouter: Router): 
   });
 
   router.post("/", (req, res) => {
-    const input = parseBody(createTaskSchema, req.body);
-    res.status(201).json(service.createTask(input));
+    const input = parseBody(taskInputSchema, req.body);
+    res.status(201).json(service.createTask(input, actorOf(req)));
+  });
+
+  router.put("/:id", (req, res) => {
+    const input = parseBody(taskInputSchema, req.body);
+    res.json(service.updateTask(req.params.id, input, actorOf(req)));
   });
 
   router.patch("/:id/status", (req, res) => {
-    const input = parseBody(updateTaskStatusSchema, req.body);
-    res.json(service.changeStatus(req.params.id, input));
+    const { status } = parseBody(updateTaskStatusSchema, req.body);
+    res.json(service.changeStatus(req.params.id, status, actorOf(req)));
   });
 
   router.delete("/:id", (req, res) => {
-    service.deleteTask(req.params.id);
+    service.deleteTask(req.params.id, actorOf(req));
     res.status(204).end();
   });
 
@@ -34,7 +47,7 @@ export function createTaskRouter(service: TaskService, auditLogRouter: Router): 
       service.assertExists(req.params.id);
       next();
     },
-    auditLogRouter,
+    taskAuditLogRouter,
   );
 
   return router;

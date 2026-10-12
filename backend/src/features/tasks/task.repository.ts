@@ -64,17 +64,19 @@ export class TaskRepository {
       .run(task);
   }
 
+  updateDetails(id: string, title: string, description: string | null, updatedAt: string): void {
+    this.db
+      .prepare("UPDATE tasks SET title = ?, description = ?, updated_at = ? WHERE id = ?")
+      .run(title, description, updatedAt, id);
+  }
+
   updateStatus(id: string, status: TaskStatus, updatedAt: string): void {
     this.db
       .prepare("UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?")
       .run(status, updatedAt, id);
   }
 
-  /** Returns false when there was no active task to delete. */
-  softDelete(id: string, deletedAt: string): boolean {
-    const result = this.db
-      .prepare("UPDATE tasks SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL")
-      .run(deletedAt, id);
-    return result.changes === 1;
+  softDelete(id: string, deletedAt: string): void {
+    this.db.prepare("UPDATE tasks SET deleted_at = ? WHERE id = ?").run(deletedAt, id);
   }
 }

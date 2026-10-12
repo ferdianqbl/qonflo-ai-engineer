@@ -12,6 +12,8 @@ const STATUS_LIST = TASK_STATUSES.map((status) => `'${status}'`).join(", ");
 
 /**
  * - Tasks are soft-deleted (`deleted_at`), so the row an audit log points to never disappears.
+ * - `audit_logs` holds one row per action. For a change, `field`, `from_value` and `to_value`
+ *   say what changed; `task_title` keeps the title the task had at that moment.
  * - `audit_logs` is append-only: the two triggers make the database itself reject any
  *   UPDATE or DELETE, whatever code issues it.
  */
@@ -29,9 +31,12 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS audit_logs (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     task_id     TEXT NOT NULL REFERENCES tasks(id),
+    task_title  TEXT NOT NULL,
     actor       TEXT NOT NULL,
-    from_status TEXT NOT NULL CHECK (from_status IN (${STATUS_LIST})),
-    to_status   TEXT NOT NULL CHECK (to_status IN (${STATUS_LIST})),
+    action      TEXT NOT NULL CHECK (action IN ('created', 'updated', 'status_changed', 'deleted')),
+    field       TEXT CHECK (field IN ('title', 'description', 'status')),
+    from_value  TEXT,
+    to_value    TEXT,
     timestamp   TEXT NOT NULL
   );
 

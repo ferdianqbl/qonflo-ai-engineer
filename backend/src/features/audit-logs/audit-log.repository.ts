@@ -1,29 +1,38 @@
 import type { Db } from "../../core/database";
-import type { TaskStatus } from "../../core/task-status";
-import type { AuditLog } from "./audit-log.types";
+import type { AuditAction, AuditField, AuditLog, NewAuditLog } from "./audit-log.types";
 
 interface AuditLogRow {
   id: number;
   task_id: string;
+  task_title: string;
   actor: string;
-  from_status: TaskStatus;
-  to_status: TaskStatus;
+  action: AuditAction;
+  field: AuditField | null;
+  from_value: string | null;
+  to_value: string | null;
   timestamp: string;
 }
+
+const COLUMNS = "id, task_id, task_title, actor, action, field, from_value, to_value, timestamp";
 
 function toAuditLog(row: AuditLogRow): AuditLog {
   return {
     id: row.id,
     taskId: row.task_id,
+    taskTitle: row.task_title,
     actor: row.actor,
-    fromStatus: row.from_status,
-    toStatus: row.to_status,
+    action: row.action,
+    field: row.field,
+    fromValue: row.from_value,
+    toValue: row.to_value,
     timestamp: row.timestamp,
   };
 }
 
 /**
  * Insert and read only: there is deliberately no method that updates or deletes an audit log.
+ * Both reads return the oldest entry first. `id` is auto-incremented, so ordering by it is
+ * ordering by when things happened.
  */
 export class AuditLogRepository {
   private readonly db: Db;
@@ -32,21 +41,27 @@ export class AuditLogRepository {
     this.db = db;
   }
 
-  insert(entry: Omit<AuditLog, "id">): void {
+  insert(entry: NewAuditLog): void {
     this.db
       .prepare(
-        `INSERT INTO audit_logs (task_id, actor, from_status, to_status, timestamp)
-         VALUES (@taskId, @actor, @fromStatus, @toStatus, @timestamp)`,
+        `INSERT INTO audit_logs (task_id, task_title, actor, action, field, from_value, to_value, timestamp)
+         VALUES (@taskId, @taskTitle, @actor, @action, @field, @fromValue, @toValue, @timestamp)`,
       )
       .run(entry);
   }
 
-  /** Oldest first. `id` is auto-incremented, so it is also the order the changes happened in. */
+  /** Every entry of every task, deleted tasks included. */
+  findAll(): AuditLog[] {
+    return this.db
+      .prepare<[], AuditLogRow>(`SELECT ${COLUMNS} FROM audit_logs ORDER BY id ASC`)
+      .all()
+      .map(toAuditLog);
+  }
+
   findByTaskId(taskId: string): AuditLog[] {
     return this.db
       .prepare<[string], AuditLogRow>(
-        `SELECT id, task_id, actor, from_status, to_status, timestamp
-         FROM audit_logs WHERE task_id = ? ORDER BY id ASC`,
+        `SELECT ${COLUMNS} FROM audit_logs WHERE task_id = ? ORDER BY id ASC`,
       )
       .all(taskId)
       .map(toAuditLog);

@@ -5,7 +5,10 @@ import { ActorRepository } from "./features/actors/actor.repository";
 import { createActorRouter } from "./features/actors/actor.routes";
 import { ActorService } from "./features/actors/actor.service";
 import { AuditLogRepository } from "./features/audit-logs/audit-log.repository";
-import { createAuditLogRouter } from "./features/audit-logs/audit-log.routes";
+import {
+  createAuditLogRouter,
+  createTaskAuditLogRouter,
+} from "./features/audit-logs/audit-log.routes";
 import { AuditLogService } from "./features/audit-logs/audit-log.service";
 import { TaskRepository } from "./features/tasks/task.repository";
 import { createTaskRouter } from "./features/tasks/task.routes";
@@ -29,7 +32,8 @@ export function createApp(db: Db): Express {
   app.use(express.json());
 
   app.use("/api/actors", createActorRouter(actorService));
-  app.use("/api/tasks", createTaskRouter(taskService, createAuditLogRouter(auditLogService)));
+  app.use("/api/audit-logs", createAuditLogRouter(auditLogService));
+  app.use("/api/tasks", createTaskRouter(taskService, createTaskAuditLogRouter(auditLogService)));
 
   app.use(notFoundHandler);
   app.use(errorHandler);

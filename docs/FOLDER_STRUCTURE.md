@@ -27,14 +27,14 @@ app/
 │   │       ├── tasks/
 │   │       │   ├── task.routes.ts        HTTP: /api/tasks
 │   │       │   ├── task.schemas.ts       Request body schemas (zod)
-│   │       │   ├── task.service.ts       Rules: status flow, idempotency, status + log together
+│   │       │   ├── task.service.ts       Rules: status flow, idempotency, every change logged with it
 │   │       │   ├── task.repository.ts    SQL for the tasks table
 │   │       │   └── task.types.ts         Task and its request shapes                 ◀ mirrored
 │   │       ├── audit-logs/
-│   │       │   ├── audit-log.routes.ts       HTTP: GET /api/tasks/:id/audit-logs
-│   │       │   ├── audit-log.service.ts      record() and listForTask() — nothing else
+│   │       │   ├── audit-log.routes.ts       HTTP: GET /api/audit-logs and GET /api/tasks/:id/audit-logs
+│   │       │   ├── audit-log.service.ts      record(), listAll() and listForTask() — nothing else
 │   │       │   ├── audit-log.repository.ts   SQL for the audit_logs table: insert and read only
-│   │       │   └── audit-log.types.ts        AuditLog shape                          ◀ mirrored
+│   │       │   └── audit-log.types.ts        AuditLog entry and its actions          ◀ mirrored
 │   │       └── actors/
 │   │           ├── actor.routes.ts       HTTP: GET /api/actors
 │   │           ├── actor.service.ts      List actors; reject an unknown actor
@@ -65,19 +65,22 @@ app/
 │       └── features/
 │           ├── tasks/
 │           │   ├── task.api.ts           Calls to /api/tasks
-│           │   ├── useTasks.ts           Task list state and actions
+│           │   ├── useTasks.ts           Task list state; create, edit, move, delete
 │           │   ├── task.types.ts         Task and its request shapes                 ◀ mirrored
 │           │   └── components/
-│           │       ├── TaskForm.tsx      Create a task
+│           │       ├── TaskForm.tsx      Title and description fields, for creating and editing
 │           │       ├── TaskList.tsx      The list, with loading and empty states
-│           │       ├── TaskItem.tsx      One task: status, actions, history toggle
+│           │       ├── TaskItem.tsx      One task: status, actions, inline edit, history toggle
 │           │       └── StatusFlow.tsx    The four-step progress bar
 │           ├── audit-logs/
-│           │   ├── audit-log.api.ts      Call to /api/tasks/:id/audit-logs
-│           │   ├── useAuditLogs.ts       Loads (and reloads) the history of one task
-│           │   ├── audit-log.types.ts    AuditLog shape                              ◀ mirrored
+│           │   ├── audit-log.api.ts      Calls to /api/audit-logs and /api/tasks/:id/audit-logs
+│           │   ├── useAuditLogs.ts       Loads the history of one task, or of all tasks
+│           │   ├── audit-log.types.ts    AuditLog entry and its actions              ◀ mirrored
 │           │   └── components/
-│           │       └── AuditLogPanel.tsx Status history of one task
+│           │       ├── AuditLogEntry.tsx   One entry, written as a sentence
+│           │       ├── AuditLogList.tsx    A history with its loading, error and empty states
+│           │       ├── AuditLogPanel.tsx   History of one task, shown inside the task
+│           │       └── AuditLogHistory.tsx History of all tasks (the History tab)
 │           └── actors/
 │               ├── actor.api.ts          Call to /api/actors
 │               ├── useActors.ts          User list and the selected actor
@@ -107,9 +110,9 @@ Files marked **◀ mirrored** exist in both projects under the same path with id
 
 | File | Contains |
 |---|---|
-| `src/core/task-status.ts` | The four statuses, `getNextStatus`, `canTransition` |
-| `src/features/tasks/task.types.ts` | `Task`, `CreateTaskRequest`, `UpdateTaskStatusRequest` |
-| `src/features/audit-logs/audit-log.types.ts` | `AuditLog` |
+| `src/core/task-status.ts` | The four statuses, `isTaskStatus`, `getNextStatus`, `canTransition` |
+| `src/features/tasks/task.types.ts` | `Task`, `TaskInput`, `UpdateTaskStatusRequest` |
+| `src/features/audit-logs/audit-log.types.ts` | `AuditLog`, `AuditAction`, `AuditField` |
 
 ## Where does new code go?
 
@@ -117,6 +120,7 @@ Files marked **◀ mirrored** exist in both projects under the same path with id
 |---|---|
 | Add a whole new feature (say, comments) | A new folder `features/comments/` on each side with the files above, then register it in `app.ts` and `App.tsx` |
 | Add a business rule about tasks | `backend/src/features/tasks/task.service.ts` |
+| Record a new kind of action in the history | Add it to `AuditAction` in `audit-log.types.ts` (both sides) and to the `CHECK` in `core/database.ts`, call `record()` from the service, describe it in `AuditLogEntry.tsx` |
 | Add or change a SQL query | The `*.repository.ts` of the feature that owns the table |
 | Add an endpoint | The feature's `*.routes.ts` on the backend, then its `*.api.ts` on the frontend |
 | Change the status flow or add a status | `core/task-status.ts` on both sides (then add a label and a badge colour in the frontend) |

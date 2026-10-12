@@ -1,6 +1,5 @@
-import { StatusBadge } from "../../../components/StatusBadge";
-import { formatDateTime } from "../../../core/format";
 import { useAuditLogs } from "../useAuditLogs";
+import { AuditLogList } from "./AuditLogList";
 
 interface AuditLogPanelProps {
   taskId: string;
@@ -9,35 +8,14 @@ interface AuditLogPanelProps {
   refreshKey: string;
 }
 
-/** The status history of one task, oldest change first. */
+/** The history of one task, shown inside that task. */
 export function AuditLogPanel({ taskId, taskTitle, refreshKey }: AuditLogPanelProps) {
-  const { logs, error } = useAuditLogs(taskId, refreshKey);
+  const { logs, error } = useAuditLogs({ taskId, refreshKey });
 
   return (
-    <section className="audit-log" aria-label={`Status history of ${taskTitle}`}>
-      <h4>Status history</h4>
-
-      {error && <p className="audit-log__note">{error}</p>}
-      {!error && logs === null && <p className="audit-log__note">Loading…</p>}
-      {!error && logs?.length === 0 && (
-        <p className="audit-log__note">No status changes yet.</p>
-      )}
-
-      {logs && logs.length > 0 && (
-        <ol className="audit-log__list">
-          {logs.map((log) => (
-            <li key={log.id}>
-              <time dateTime={log.timestamp} title={log.timestamp}>
-                {formatDateTime(log.timestamp)}
-              </time>
-              <span>
-                <strong>{log.actor}</strong> changed status from{" "}
-                <StatusBadge status={log.fromStatus} /> to <StatusBadge status={log.toStatus} />
-              </span>
-            </li>
-          ))}
-        </ol>
-      )}
+    <section className="audit-log" aria-label={`History of ${taskTitle}`}>
+      <h4>History</h4>
+      <AuditLogList logs={logs} error={error} showTask={false} />
     </section>
   );
 }

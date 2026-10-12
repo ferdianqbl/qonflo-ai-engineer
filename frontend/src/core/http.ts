@@ -25,11 +25,28 @@ export class ApiError extends Error {
   }
 }
 
+interface RequestOptions {
+  method?: string;
+  body?: unknown;
+  /** Who is acting. Sent as the `X-Actor` header; the backend requires it on every write. */
+  actor?: string;
+}
+
 /** The one place that calls `fetch`. Every feature's `*.api.ts` goes through it. */
-export async function request<T>(path: string, method = "GET", body?: unknown): Promise<T> {
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const { method = "GET", body, actor } = options;
+
+  const headers: Record<string, string> = {};
+  if (body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+  if (actor) {
+    headers["X-Actor"] = actor;
+  }
+
   const response = await fetch(`/api${path}`, {
     method,
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 

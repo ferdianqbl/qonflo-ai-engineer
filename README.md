@@ -198,13 +198,25 @@ After those: pagination and filtering, live updates, and turning the audit log i
 
 ### 4. Jika kamu menggunakan AI, jelaskan bagian mana yang dibantu AI dan bagaimana cara kamu memvalidasinya?
 
-**What AI did.** I used Claude Code as a pair programmer for most of this project. Working from the brief and my direction, it produced the first version of the backend, the frontend, the tests and these documents.
+I used AI (Claude Code) as a working partner at every stage of this test.
 
-**How it was validated.**
+**Where AI helped**
 
-- **Automated tests** — 20 tests run the real API against an in-memory database and cover each requirement, including the failure cases: invalid transitions, repeated updates, a forced log-write failure, and direct `UPDATE`/`DELETE` on the audit table.
+1. **Understanding the tech test.** Breaking the brief down into concrete requirements — functional, non-functional and deliverables — so that nothing was missed. That breakdown became [docs/PRD.md](docs/PRD.md).
+2. **Brainstorming the best setup.** Comparing options before building: where to store the data, how to make the audit log impossible to change, how to keep a task's status and its log in sync, and whether the two projects should share code. What was chosen and what each choice costs is in [Trade-offs](#trade-offs).
+3. **Architecture.** Turning the structure I wanted into concrete rules: the same three features on both sides, each with routes → service → repository on the backend and components → hook → api on the frontend, and only `tasks` depending on the other two.
+4. **Defining the documents.** Deciding what each document under `docs/` should cover — PRD, architecture, folder structure, design system, validation — and drafting them.
+5. **Implementation.** The code was written with Claude Code, following the decisions above.
+6. **Validating every feature.** Writing the tests and running the checks described below.
+
+The direction was mine: the layout of the repository (`backend`, `frontend`, `docs`), the feature-based architecture with repository, service and routes, mirroring that structure on the frontend, keeping the two projects free of a shared package, and which documents to write.
+
+**How it was validated**
+
+- **Requirement by requirement** — every requirement in the PRD is mapped to the test or manual check that proves it, in [docs/VALIDATION.md](docs/VALIDATION.md).
+- **Automated tests** — 20 tests run the real API against an in-memory database, including the failure cases: invalid transitions, repeated updates, a forced log-write failure, and direct `UPDATE`/`DELETE` on the audit table.
 - **Type checking** — `npm run typecheck` across both projects, with strict settings.
 - **Running it** — the full flow was walked through in the browser, and the error responses were checked with `curl`.
 - **A fresh copy** — the tracked files were copied to an empty folder and installed, tested and built from scratch.
 
-The steps and results are written down in [docs/VALIDATION.md](docs/VALIDATION.md), including what was *not* verified.
+The same document also lists what was *not* verified.
